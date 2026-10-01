@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Touchpad Dashboard
 
-## Getting Started
+Next.js 15 dashboard untuk monitoring remote touchpad server.
 
-First, run the development server:
+## Struktur Project
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+touchpad-dashboard/     # Next.js app (deploy ke Vercel)
+remote-touchpad/        # Python FastAPI server (jalan di laptop target)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Fitur Dashboard
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- ✅ Status server real-time (health check)
+- ✅ Jumlah device terhubung
+- ✅ Konfigurasi touchpad (sensitivitas, gesture, heartbeat, reconnect)
+- ✅ Public tunnel URL (Cloudflare)
+- ✅ Auto-refresh 10 detik
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup Lokal
 
-## Learn More
+### 1. Install dependencies
+```bash
+cd touchpad-dashboard
+npm install
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 2. Environment variables
+Buat `.env.local`:
+```env
+NEXT_PUBLIC_LOCAL_SERVER_URL=http://localhost:8000
+NEXT_PUBLIC_TUNNEL_URL=https://your-tunnel.trycloudflare.com
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 3. Jalankan development
+```bash
+npm run dev
+# Buka http://localhost:3000
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 4. Build production
+```bash
+npm run build
+npm start
+```
 
-## Deploy on Vercel
+## Deploy ke Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Push ke GitHub
+2. Import di Vercel
+3. Set environment variables:
+   - `NEXT_PUBLIC_LOCAL_SERVER_URL` = `http://localhost:8000` (atau IP LAN)
+   - `NEXT_PUBLIC_TUNNEL_URL` = URL Cloudflare tunnel Anda
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Touchpad Server (Python)
+
+Jalan di laptop yang dikontrol:
+```bash
+cd remote-touchpad
+python server.py start
+```
+
+Akses internet via Cloudflare Tunnel:
+```bash
+cloudflared tunnel --url http://localhost:8000
+```
+
+## Tech Stack
+
+- Next.js 15 (App Router)
+- TypeScript
+- Tailwind CSS
+- Vercel (deploy)
+- Python FastAPI + WebSocket (server touchpad)
+- Cloudflare Tunnel (internet access)
