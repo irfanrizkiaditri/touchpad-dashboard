@@ -29,6 +29,14 @@ class RemoteSocketManager {
       if (savedUrl) {
         this.url = savedUrl;
       }
+      // Auto-connect ke server touchpad default saat dashboard pertama kali dibuka.
+      // Tanpa ini status selalu "Standalone" dan kontrol mouse tidak pernah terkirim.
+      if (!this.url) {
+        const sameHost = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host.replace(/:\d+$/, ':8000')}/ws`;
+        this.url = sameHost;
+      }
+      // Sambungkan setelah load agar tidak memblokir render
+      setTimeout(() => this.connect(), 100);
     }
   }
 
