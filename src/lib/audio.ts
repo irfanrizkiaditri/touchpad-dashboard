@@ -74,7 +74,7 @@ class AudioManager {
     }
   }
 
-  // Efek getar HP
+  // Efek getar HP biasa
   public triggerHaptic(duration = 20): void {
     if (typeof window !== 'undefined' && 'vibrate' in navigator) {
       try {
@@ -83,6 +83,16 @@ class AudioManager {
         // Abaikan
       }
     }
+  }
+
+  // Efek getar khusus sentuhan tepi scroll (Edge Bump Vibration)
+  public triggerEdgeHaptic(): void {
+    if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(16);
+      } catch {}
+    }
+    this.playClick(1400, 0.02);
   }
 }
 

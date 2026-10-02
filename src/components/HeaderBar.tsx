@@ -3,13 +3,24 @@
 import { useState, useEffect } from 'react';
 import { remoteSocket, ConnectionState } from '@/lib/socket';
 import { audioManager } from '@/lib/audio';
-import { Volume2, VolumeX, Maximize2, Settings, X } from 'lucide-react';
+import { Volume2, VolumeX, Maximize2, Settings, X, Smartphone } from 'lucide-react';
+import { AccelProfile } from '@/components/FullscreenTouchpad';
 
 interface HeaderBarProps {
   onEnterFullscreen: () => void;
+  isLandscape: boolean;
+  onToggleOrientation: () => void;
+  accelProfile: AccelProfile;
+  onSetAccelProfile: (profile: AccelProfile) => void;
 }
 
-export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
+export function HeaderBar({
+  onEnterFullscreen,
+  isLandscape,
+  onToggleOrientation,
+  accelProfile,
+  onSetAccelProfile,
+}: HeaderBarProps) {
   const [status, setStatus] = useState<ConnectionState>(() => remoteSocket.getStatus());
   const [showConfig, setShowConfig] = useState(false);
   const [serverUrl, setServerUrl] = useState(() => remoteSocket.getUrl());
@@ -42,14 +53,14 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
   };
 
   return (
-    <header className="w-full px-3 py-2 border-b border-zinc-800/80 bg-black/90 backdrop-blur-md text-zinc-300 transition-colors shrink-0">
-      <div className="max-w-md mx-auto flex items-center justify-between gap-2">
+    <header className="w-full px-3 py-1.5 border-b border-zinc-800/80 bg-black/90 backdrop-blur-md text-zinc-300 transition-colors shrink-0">
+      <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
         {/* Judul Atas: Fanra Mouse */}
         <div className="flex items-center gap-2">
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-medium text-zinc-200 tracking-wide">Fanra Mouse</span>
-              <span className="text-[10px] text-zinc-500 font-normal">v1.2</span>
+              <span className="text-[9px] text-zinc-500 font-normal">v1.2</span>
             </div>
             <button
               type="button"
@@ -74,7 +85,7 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
           </div>
         </div>
 
-        {/* Tombol Kontrol: Suara & Layar Penuh (Ukuran agak kecil) */}
+        {/* Tombol Kontrol: Suara, Orientasi Mendatar, Layar Penuh */}
         <div className="flex items-center gap-1">
           {/* Suara */}
           <button
@@ -91,7 +102,26 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
             <span className="hidden sm:inline">{soundEnabled ? 'Suara' : 'Bisu'}</span>
           </button>
 
-          {/* Layar Penuh (Masuk ke mode touchpad hitam bersih) */}
+          {/* Toggle Orientasi Mendatar (Landscape) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleOrientation();
+              try { audioManager.playClick(950); } catch {}
+            }}
+            className={`px-2 py-1 text-[11px] rounded border transition-colors cursor-pointer flex items-center gap-1 ${
+              isLandscape
+                ? 'border-zinc-700 bg-zinc-900 text-zinc-200 font-medium'
+                : 'border-zinc-850 bg-black text-zinc-400 hover:text-zinc-200'
+            }`}
+            title={isLandscape ? 'Kembali ke Orientasi Tegak (Portrait)' : 'Beralih ke Orientasi Mendatar (Landscape)'}
+          >
+            <Smartphone className={`w-3 h-3 ${isLandscape ? 'rotate-90 text-zinc-200' : 'text-zinc-400'}`} />
+            <span className="hidden sm:inline">{isLandscape ? 'Tegak' : 'Mendatar'}</span>
+          </button>
+
+          {/* Layar Penuh */}
           <button
             type="button"
             onClick={(e) => {
@@ -108,12 +138,12 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
         </div>
       </div>
 
-      {/* Modal Pengaturan Server */}
+      {/* Modal Pengaturan Server & Profil Akselerasi */}
       {showConfig && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-sm border border-zinc-800 rounded bg-zinc-950 text-zinc-200 p-4 shadow-2xl">
-            <div className="flex items-center justify-between mb-3 border-b border-zinc-800/80 pb-2">
-              <span className="text-xs font-medium text-zinc-200">Pengaturan Alamat Server</span>
+          <div className="w-full max-w-sm border border-zinc-800 rounded bg-zinc-950 text-zinc-200 p-4 shadow-2xl space-y-3.5">
+            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
+              <span className="text-xs font-medium text-zinc-200">Pengaturan Remote Touchpad</span>
               <button
                 type="button"
                 onClick={() => setShowConfig(false)}
@@ -123,7 +153,43 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveUrl} className="space-y-3">
+            {/* Profil Akselerasi Kursor */}
+            <div>
+              <label className="block text-[11px] text-zinc-400 mb-1.5">
+                Profil Akselerasi Kursor:
+              </label>
+              <div className="grid grid-cols-3 gap-1">
+                {(['smooth', 'fast', 'linear'] as AccelProfile[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => {
+                      onSetAccelProfile(p);
+                      try {
+                        localStorage.setItem('fanra_mouse_accel_profile', p);
+                        audioManager.playClick(1000);
+                      } catch {}
+                    }}
+                    className={`py-1.5 px-2 text-[10px] rounded border text-center transition-colors cursor-pointer ${
+                      accelProfile === p
+                        ? 'border-zinc-700 bg-zinc-800 text-zinc-100 font-medium'
+                        : 'border-zinc-900 bg-black text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {p === 'smooth' ? 'Halus' : p === 'fast' ? 'Cepat' : 'Linier'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-500 mt-1">
+                {accelProfile === 'smooth'
+                  ? 'Halus: Kurva lembut, presisi tinggi untuk memilih teks atau desain.'
+                  : accelProfile === 'fast'
+                  ? 'Cepat: Agresif melompat jauh untuk layar monitor lebar.'
+                  : 'Linier: Rasio konstan 1:1 tanpa akselerasi kecepatan.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveUrl} className="space-y-3 pt-1 border-t border-zinc-900">
               <div>
                 <label className="block text-[11px] text-zinc-400 mb-1">
                   Alamat WebSocket Server (FastAPI / Tunnel):
@@ -137,19 +203,19 @@ export function HeaderBar({ onEnterFullscreen }: HeaderBarProps) {
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-1.5 pt-2">
+              <div className="flex items-center justify-end gap-1.5 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowConfig(false)}
                   className="px-2.5 py-1 text-xs border border-zinc-800 rounded text-zinc-400 hover:bg-zinc-900 cursor-pointer"
                 >
-                  Batal
+                  Tutup
                 </button>
                 <button
                   type="submit"
                   className="px-3 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded font-medium cursor-pointer"
                 >
-                  Simpan
+                  Simpan & Hubungkan
                 </button>
               </div>
             </form>

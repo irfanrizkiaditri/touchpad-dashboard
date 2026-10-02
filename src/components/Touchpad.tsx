@@ -3,8 +3,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { remoteSocket, TouchpadEvent } from '@/lib/socket';
 import { audioManager } from '@/lib/audio';
+import { AccelProfile } from '@/components/FullscreenTouchpad';
 
-export function Touchpad() {
+interface TouchpadProps {
+  accelProfile: AccelProfile;
+  onSetAccelProfile: (profile: AccelProfile) => void;
+}
+
+export function Touchpad({ accelProfile, onSetAccelProfile }: TouchpadProps) {
   const padRef = useRef<HTMLDivElement>(null);
   const [sensitivity, setSensitivity] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -24,6 +30,7 @@ export function Touchpad() {
   const [cursorPos, setCursorPos] = useState({ x: 50, y: 50 });
   const [showCursor, setShowCursor] = useState(false);
   const [pressedBtn, setPressedBtn] = useState<'left' | 'middle' | 'right' | null>(null);
+  const [isEdgeScrolling, setIsEdgeScrolling] = useState(false);
 
   const gestureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -45,6 +52,15 @@ export function Touchpad() {
     displayAction(`Kecepatan: ${val.toFixed(1)}x`);
   };
 
+  const handleSwitchProfile = (p: AccelProfile) => {
+    onSetAccelProfile(p);
+    try {
+      localStorage.setItem('fanra_mouse_accel_profile', p);
+      audioManager.playClick(1150);
+    } catch {}
+    displayAction(`Akselerasi: ${p === 'smooth' ? 'Halus' : p === 'fast' ? 'Cepat' : 'Linier'}`);
+  };
+
   useEffect(() => {
     const unsub = remoteSocket.subscribeAction((ev: TouchpadEvent) => {
       if (ev.type === 'key') {
@@ -63,6 +79,7 @@ export function Touchpad() {
     startY: number;
     lastX: number;
     lastY: number;
+    lastTime: number;
     startTime: number;
     movedDistance: number;
     fingerCount: number;
@@ -71,11 +88,13 @@ export function Touchpad() {
     twoFingerMoved: number;
     lastTapTime: number;
     isDragging: boolean;
+    isEdgeZone: boolean;
   }>({
     startX: 0,
     startY: 0,
     lastX: 0,
     lastY: 0,
+    lastTime: 0,
     startTime: 0,
     movedDistance: 0,
     fingerCount: 0,
@@ -84,6 +103,7 @@ export function Touchpad() {
     twoFingerMoved: 0,
     lastTapTime: 0,
     isDragging: false,
+    isEdgeZone: false,
   });
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -91,17 +111,30 @@ export function Touchpad() {
     const now = Date.now();
     touchState.current.fingerCount = count;
     touchState.current.startTime = now;
+    touchState.current.lastTime = now;
 
     if (count === 1) {
       const t = e.touches[0];
       const pad = padRef.current;
+      let inEdgeZone = false;
+
       if (pad) {
         const rect = pad.getBoundingClientRect();
+        const relX = (t.clientX - rect.left) / rect.width;
+        // Zona tepi kanan 12% untuk scroll 1 jari
+        inEdgeZone = relX > 0.88;
         setCursorPos({
-          x: ((t.clientX - rect.left) / rect.width) * 100,
+          x: relX * 100,
           y: ((t.clientY - rect.top) / rect.height) * 100,
         });
-        setShowCursor(true);
+        if (!inEdgeZone) setShowCursor(true);
+      }
+
+      touchState.current.isEdgeZone = inEdgeZone;
+      if (inEdgeZone) {
+        setIsEdgeScrolling(true);
+        // Umpan Balik Haptic Khusus Tepi Layar (Edge Bump Vibration)
+        try { audioManager.triggerEdgeHaptic(); } catch {}
       }
 
       touchState.current.startX = t.clientX;
@@ -111,7 +144,7 @@ export function Touchpad() {
       touchState.current.movedDistance = 0;
 
       // Double-Tap Drag
-      if (now - touchState.current.lastTapTime < 280) {
+      if (!inEdgeZone && now - touchState.current.lastTapTime < 280) {
         touchState.current.isDragging = true;
         remoteSocket.sendDown('left');
         displayAction('Tahan & Geser');
@@ -125,6 +158,8 @@ export function Touchpad() {
       touchState.current.twoFingerStartY = midY;
       touchState.current.twoFingerLastY = midY;
       touchState.current.twoFingerMoved = 0;
+      touchState.current.isEdgeZone = false;
+      setIsEdgeScrolling(false);
       setShowCursor(false);
     } else if (count === 3) {
       setShowCursor(false);
@@ -133,6 +168,8 @@ export function Touchpad() {
 
   const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
     const count = e.touches.length;
+    const now = Date.now();
+    const dt = Math.max(10, now - touchState.current.lastTime);
 
     if (count === 1) {
       const t = e.touches[0];
@@ -142,13 +179,37 @@ export function Touchpad() {
       touchState.current.movedDistance += Math.hypot(dx, dy);
       touchState.current.lastX = t.clientX;
       touchState.current.lastY = t.clientY;
+      touchState.current.lastTime = now;
+
+      // 1. Zona Scroll Tepi Kanan (Edge Scroll 1 Jari)
+      if (touchState.current.isEdgeZone) {
+        const scrollFactor = 3.0 * sensitivity;
+        remoteSocket.sendScroll(0, Math.round(dy * scrollFactor));
+        displayAction(dy > 0 ? 'Scroll Bawah' : 'Scroll Atas');
+        return;
+      }
+
+      // 2. Akselerasi Kursor Dinamis Berdasarkan Profil
+      const speed = Math.hypot(dx, dy) / dt;
+      let accel = 1.0;
+
+      if (accelProfile === 'smooth') {
+        // Halus / Presisi: kurva lembut, max 2.2x
+        accel = speed > 0.8 ? Math.min(2.2, 1.0 + (speed - 0.8) * 0.7) : 1.0;
+      } else if (accelProfile === 'fast') {
+        // Cepat / Agresif: kurva responsif, max 3.4x
+        accel = speed > 0.6 ? Math.min(3.4, 1.0 + (speed - 0.6) * 1.3) : 1.0;
+      } else {
+        // Linier / Nonaktif
+        accel = 1.0;
+      }
 
       setCursorPos((prev) => ({
-        x: Math.max(2, Math.min(98, prev.x + (dx / 3) * sensitivity)),
-        y: Math.max(2, Math.min(98, prev.y + (dy / 3) * sensitivity)),
+        x: Math.max(2, Math.min(98, prev.x + ((dx / 3) * sensitivity * accel))),
+        y: Math.max(2, Math.min(98, prev.y + ((dy / 3) * sensitivity * accel))),
       }));
 
-      remoteSocket.sendMove(dx * sensitivity, dy * sensitivity);
+      remoteSocket.sendMove(dx * sensitivity * accel, dy * sensitivity * accel);
     } else if (count === 2) {
       const t1 = e.touches[0];
       const t2 = e.touches[1];
@@ -166,6 +227,7 @@ export function Touchpad() {
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
     const duration = Date.now() - touchState.current.startTime;
+    setIsEdgeScrolling(false);
 
     if (touchState.current.isDragging) {
       touchState.current.isDragging = false;
@@ -175,40 +237,42 @@ export function Touchpad() {
       return;
     }
 
-    // 1 Jari Tap -> Klik Kiri
-    if (touchState.current.fingerCount === 1 && touchState.current.movedDistance < 12 && duration < 300) {
-      touchState.current.lastTapTime = Date.now();
-      remoteSocket.sendClick('left');
-      try {
-        audioManager.playClick(1100);
-        audioManager.triggerHaptic(20);
-      } catch {}
-      displayAction('Klik Kiri');
-    }
+    if (!touchState.current.isEdgeZone) {
+      // 1 Jari Tap -> Klik Kiri
+      if (touchState.current.fingerCount === 1 && touchState.current.movedDistance < 12 && duration < 300) {
+        touchState.current.lastTapTime = Date.now();
+        remoteSocket.sendClick('left');
+        try {
+          audioManager.playClick(1100);
+          audioManager.triggerHaptic(20);
+        } catch {}
+        displayAction('Klik Kiri');
+      }
 
-    // 2 Jari Tap -> Klik Kanan
-    if (touchState.current.fingerCount === 2 && touchState.current.twoFingerMoved < 14 && duration < 350) {
-      remoteSocket.sendClick('right');
-      try {
-        audioManager.playClick(650);
-        audioManager.triggerHaptic(30);
-      } catch {}
-      displayAction('Klik Kanan');
-    }
+      // 2 Jari Tap -> Klik Kanan
+      if (touchState.current.fingerCount === 2 && touchState.current.twoFingerMoved < 14 && duration < 350) {
+        remoteSocket.sendClick('right');
+        try {
+          audioManager.playClick(650);
+          audioManager.triggerHaptic(30);
+        } catch {}
+        displayAction('Klik Kanan');
+      }
 
-    // 3 Jari Tap -> Klik Tengah
-    if (touchState.current.fingerCount === 3 && duration < 380) {
-      remoteSocket.sendClick('middle');
-      try {
-        audioManager.playClick(850);
-        audioManager.triggerHaptic(25);
-      } catch {}
-      displayAction('Klik Tengah');
+      // 3 Jari Tap -> Klik Tengah
+      if (touchState.current.fingerCount === 3 && duration < 380) {
+        remoteSocket.sendClick('middle');
+        try {
+          audioManager.playClick(850);
+          audioManager.triggerHaptic(25);
+        } catch {}
+        displayAction('Klik Tengah');
+      }
     }
 
     if (e.touches.length === 0) {
       touchState.current.fingerCount = 0;
-      setTimeout(() => setShowCursor(false), 800);
+      setTimeout(() => setShowCursor(false), 700);
     }
   };
 
@@ -231,7 +295,6 @@ export function Touchpad() {
     displayAction(label);
   };
 
-  // Navigasi mouse untuk testing desktop
   const isMouseDown = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
 
@@ -257,16 +320,37 @@ export function Touchpad() {
 
   return (
     <div className="w-full flex flex-col flex-1 min-h-[290px] text-zinc-300">
-      {/* 1. Bar Kecepatan Kursor & Status (Ukuran agak kecil) */}
-      <div className="flex items-center justify-between px-1 py-1 mb-1 text-[11px] border-b border-zinc-900">
-        <div className="flex items-center gap-1 truncate max-w-[48%]">
-          <span className="text-zinc-500 text-[10px]">Aksi:</span>
-          <span className="text-zinc-300 truncate text-[10px] font-normal">{lastAction}</span>
+      {/* 1. Bar Kecepatan Kursor & Profil Akselerasi */}
+      <div className="flex items-center justify-between px-1 py-1 mb-1 text-[11px] border-b border-zinc-900 gap-1 overflow-x-auto no-scrollbar">
+        {/* Tombol Profil Akselerasi (Halus / Cepat / Linier) */}
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-zinc-500 text-[10px]">Profil:</span>
+          {(['smooth', 'fast', 'linear'] as AccelProfile[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => handleSwitchProfile(p)}
+              className={`px-1.5 py-0.5 text-[10px] rounded border transition-colors cursor-pointer ${
+                accelProfile === p
+                  ? 'border-zinc-700 bg-zinc-800 text-zinc-100 font-medium'
+                  : 'border-zinc-900 bg-black text-zinc-500 hover:text-zinc-300'
+              }`}
+              title={
+                p === 'smooth'
+                  ? 'Akselerasi Halus (Presisi teks & desain)'
+                  : p === 'fast'
+                  ? 'Akselerasi Cepat (Agresif melompat jauh)'
+                  : 'Linier / Konstan 1:1'
+              }
+            >
+              {p === 'smooth' ? 'Halus' : p === 'fast' ? 'Cepat' : 'Linier'}
+            </button>
+          ))}
         </div>
 
-        {/* Tombol Kecepatan Kursor (Kotak agak kecil) */}
-        <div className="flex items-center gap-1">
-          <span className="text-zinc-500 text-[10px] hidden sm:inline">Kecepatan:</span>
+        {/* Tombol Kecepatan Kursor */}
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-zinc-500 text-[10px] hidden sm:inline">Speed:</span>
           {[1.0, 1.5, 2.0, 2.5, 3.0].map((s) => (
             <button
               key={s}
@@ -301,10 +385,18 @@ export function Touchpad() {
         className="relative flex-1 w-full min-h-[260px] bg-[#070709] border border-zinc-800/80 rounded flex flex-col justify-between overflow-hidden cursor-crosshair select-none transition-colors"
         style={{ touchAction: 'none' }}
       >
+        {/* Indikator Halus Zona Scroll Tepi Kanan */}
+        <div
+          className={`absolute right-0 top-0 bottom-0 w-1 transition-opacity duration-200 pointer-events-none ${
+            isEdgeScrolling ? 'bg-zinc-600 opacity-90' : 'bg-zinc-850/40 opacity-30'
+          }`}
+          title="Zona Scroll Tepi Kanan"
+        />
+
         {/* Label Atas & Badge Aksi */}
         <div className="p-2.5 flex items-start justify-between pointer-events-none">
-          <span className="text-[9px] uppercase tracking-wider text-zinc-600 font-normal">
-            Touchpad
+          <span className="text-[9px] uppercase tracking-wider text-zinc-600 font-normal truncate max-w-[60%]">
+            Touchpad • {lastAction}
           </span>
           {activeGesture && (
             <div className="px-2 py-0.5 text-[10px] rounded border border-zinc-800 bg-zinc-900 text-zinc-200">
@@ -329,20 +421,20 @@ export function Touchpad() {
             Geser jari untuk menggerakkan kursor
           </p>
           <div className="flex flex-wrap justify-center items-center gap-x-2.5 gap-y-1 mt-1.5 text-[10px] text-zinc-600">
-            <span>1 Tap: Klik Kiri</span>
+            <span>1 Tap: Kiri</span>
             <span>•</span>
-            <span>2 Tap: Klik Kanan</span>
+            <span>2 Tap: Kanan</span>
             <span>•</span>
-            <span>2 Geser: Scroll</span>
+            <span>3 Tap: Tengah</span>
             <span>•</span>
-            <span>3 Tap: Klik Tengah</span>
+            <span>Tepi Kanan: Scroll (Getar)</span>
           </div>
         </div>
 
         <div className="h-2 pointer-events-none" />
       </div>
 
-      {/* 3. Tombol Fisik: Klik Kiri, Klik Tengah, Klik Kanan (Kotak agak kecil) */}
+      {/* 3. Tombol Fisik: Klik Kiri, Klik Tengah, Klik Kanan */}
       <div className="w-full grid grid-cols-3 gap-1 mt-1.5">
         <button
           type="button"
