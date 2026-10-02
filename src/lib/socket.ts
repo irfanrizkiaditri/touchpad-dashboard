@@ -109,6 +109,17 @@ class RemoteSocketManager {
         this.state = 'disconnected';
         this.notify();
       };
+      // Balas ping server agar koneksi tidak dianggap timeout
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+          if (msg?.type === 'ping' && this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'pong', t: Date.now() }));
+          }
+        } catch {
+          // Bukan JSON, abaikan
+        }
+      };
     } catch {
       this.state = 'disconnected';
       this.notify();
