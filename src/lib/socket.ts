@@ -31,9 +31,15 @@ class RemoteSocketManager {
       }
       // Auto-connect ke server touchpad default saat dashboard pertama kali dibuka.
       // Tanpa ini status selalu "Standalone" dan kontrol mouse tidak pernah terkirim.
-      if (!this.url) {
-        const sameHost = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host.replace(/:\d+$/, ':8000')}/ws`;
-        this.url = sameHost;
+      const publicWs = process.env.NEXT_PUBLIC_TOUCHPAD_WS;
+      if (publicWs) {
+        this.url = publicWs;
+      } else if (!this.url) {
+        const secure = window.location.protocol === 'https:';
+        const host = window.location.hostname; // tanpa port
+        const proto = secure ? 'wss' : 'ws';
+        // Akses langsung di WiFi rumah: pakai port 8000 server touchpad
+        this.url = `${proto}://${host}:8000/ws`;
       }
       // Sambungkan setelah load agar tidak memblokir render
       setTimeout(() => this.connect(), 100);
